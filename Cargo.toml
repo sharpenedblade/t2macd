@@ -1,5 +1,6 @@
 [package]
-name = "apple-t2-controld"
+name = "t2macd"
+license = "GPL-3.0-or-later"
 version = "0.1.0"
 edition = "2021"
 
