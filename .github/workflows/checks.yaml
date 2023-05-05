@@ -1,0 +1,21 @@
+on: [push]
+
+name: CI
+
+jobs:
+  check:
+    name: "Run Linter"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout Repo"
+        uses: actions/checkout@v2
+
+      - name: "Install Rust Toolchain"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: "Run `cargo check`"
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
