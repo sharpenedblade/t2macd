@@ -31,28 +31,28 @@ impl Fan {
         Fan {
             path: path.clone(),
             max_speed: fs::read_to_string(Path::join(&path, "_max"))
-                .expect("Error")
+                .expect("Failed to read max speed")
                 .parse()
-                .expect("Error"),
+                .expect("Failed to parse max speed"),
             min_speed: fs::read_to_string(Path::join(&path, "_min"))
-                .expect("Error")
+                .expect("Failed to read min speed")
                 .parse()
-                .expect("Error"),
+                .expect("Failed to parse min speed"),
         }
     }
 
     fn set_speed(&self, speed: u32) {
         let mut output_path: PathBuf = self.path.to_owned();
         output_path.push("_output");
-        fs::write(output_path, speed.to_string()).expect("Error");
+        fs::write(output_path, speed.to_string()).expect("Failed to set fan speed");
     }
 
     fn set_manual_control(&self, control: bool) {
         let output_path: PathBuf = Path::join(&self.path, "_manual");
         if control {
-            fs::write(output_path, "1").expect("Error");
+            fs::write(output_path, "1").expect("Failed to enable manual control");
         } else {
-            fs::write(output_path, "0").expect("Error");
+            fs::write(output_path, "0").expect("Failed to disable manual control");
         }
     }
 }
@@ -60,26 +60,26 @@ impl Fan {
 fn init_fans() -> Vec<Fan> {
     let mut all_fans = Vec::new();
     // TODO: Remove last 6 chars from file name, currently BROKEN
-    for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*").expect("Error") {
+    for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*").expect("Failed to locate fan devices") {
         all_fans.push(Fan::new(&i.expect("Error")))
     }
     if all_fans.len() == 0 {
-        panic!("Error");
+        panic!("Fan objects failed to initialize, there could be no fans");
     }
     return all_fans;
 }
 
 fn get_gpu_temp() -> u32 {
     let gpu_temp_path = PathBuf::from("/sys/class/drm/card0/device/hwmon/hwmon*/temp1_input");
-    let gpu_temp: String = fs::read_to_string(gpu_temp_path).expect("Failed to get gpu temprature");
-    let gpu_temp: u32 = gpu_temp.parse().expect("error");
+    let gpu_temp: String = fs::read_to_string(gpu_temp_path).expect("Failed to get GPU temperature");
+    let gpu_temp: u32 = gpu_temp.parse().expect("Failed to parse GPU temperature");
     gpu_temp
 }
 
 fn get_cpu_temp() -> u32 {
     let cpu_temp_path = PathBuf::from("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input");
-    let cpu_temp: String = fs::read_to_string(cpu_temp_path).expect("Failed to get cpu temprature");
-    let cpu_temp: u32 = cpu_temp.parse().expect("error");
+    let cpu_temp: String = fs::read_to_string(cpu_temp_path).expect("Failed to get CPU temperature");
+    let cpu_temp: u32 = cpu_temp.parse().expect("Failed to parse CPU temperature");
     cpu_temp
 }
 
