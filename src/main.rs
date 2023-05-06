@@ -12,7 +12,7 @@
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <https://www.gnu.org/licenses/>. 
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use glob::glob;
 use std::fs;
@@ -20,16 +20,20 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::u32;
 
+enum FanCurve {
+    LINEAR,
+}
+
 struct Fan {
     path: PathBuf,
     max_speed: u32,
     min_speed: u32,
+    speed_curve: FanCurve,
 }
 
 impl Fan {
-    fn new(path: &PathBuf) -> Fan {
-        Fan {
-            path: path.clone(),
+    fn new(path: PathBuf) -> Fan {
+        let fan = Fan {
             max_speed: fs::read_to_string(Path::join(&path, "_max"))
                 .expect("Failed to read max speed")
                 .parse()
@@ -38,72 +42,67 @@ impl Fan {
                 .expect("Failed to read min speed")
                 .parse()
                 .expect("Failed to parse min speed"),
-        }
+            path,
+            speed_curve: FanCurve::LINEAR,
+        };
+        fs::write(Path::join(&fan.path, "_manual"), "1")
+            .expect("Failed to enable manual fan control");
+        return fan;
     }
 
     fn set_speed(&self, speed: u32) {
-        let mut output_path: PathBuf = self.path.to_owned();
-        output_path.push("_output");
-        fs::write(output_path, speed.to_string()).expect("Failed to set fan speed");
+        fs::write(Path::join(&self.path, "_output"), speed.to_string())
+            .expect("Failed to set fan speed");
     }
 
-    fn set_manual_control(&self, control: bool) {
-        let output_path: PathBuf = Path::join(&self.path, "_manual");
-        if control {
-            fs::write(output_path, "1").expect("Failed to enable manual control");
-        } else {
-            fs::write(output_path, "0").expect("Failed to disable manual control");
+    fn calc_speed(&self, current_temp: u32) -> u32 {
+        let min_temp: u32 = 80;
+        let max_temp: u32 = 100;
+        match self.speed_curve {
+            FanCurve::LINEAR => {
+                (current_temp - min_temp) / (max_temp - min_temp)
+                    * (self.max_speed - self.max_speed)
+                    + self.min_speed
+            }
         }
     }
 }
 
 fn init_fans() -> Vec<Fan> {
     let mut all_fans = Vec::new();
-    // TODO: Remove last 6 chars from file name, currently BROKEN
-    for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*").expect("Failed to locate fan devices") {
-        all_fans.push(Fan::new(&i.expect("Error")))
+    // TODO: Remove "_input" from file name, currently BROKEN
+    for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*").expect("Failed to locate fan") {
+        all_fans.push(Fan::new(i.expect("Error")))
     }
     if all_fans.len() == 0 {
-        panic!("Fan objects failed to initialize, there could be no fans");
+        panic!("Fan objects failed to initialize");
     }
     return all_fans;
 }
 
-fn get_gpu_temp() -> u32 {
-    let gpu_temp_path = PathBuf::from("/sys/class/drm/card0/device/hwmon/hwmon*/temp1_input");
-    let gpu_temp: String = fs::read_to_string(gpu_temp_path).expect("Failed to get GPU temperature");
-    let gpu_temp: u32 = gpu_temp.parse().expect("Failed to parse GPU temperature");
-    gpu_temp
-}
-
-fn get_cpu_temp() -> u32 {
-    let cpu_temp_path = PathBuf::from("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input");
-    let cpu_temp: String = fs::read_to_string(cpu_temp_path).expect("Failed to get CPU temperature");
-    let cpu_temp: u32 = cpu_temp.parse().expect("Failed to parse CPU temperature");
-    cpu_temp
-}
-
 fn get_current_temp() -> u32 {
-    if get_gpu_temp() > get_cpu_temp() {
-        get_gpu_temp()
+    let cpu_temp_path = PathBuf::from("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input");
+    let cpu_temp: String =
+        fs::read_to_string(cpu_temp_path).expect("Failed to get CPU temperature");
+    let cpu_temp: u32 = cpu_temp.parse().expect("Failed to parse CPU temperature");
+
+    let gpu_temp_path = PathBuf::from("/sys/class/drm/card0/device/hwmon/hwmon*/temp1_input");
+    let gpu_temp: String =
+        fs::read_to_string(gpu_temp_path).expect("Failed to get GPU temperature");
+    let gpu_temp: u32 = gpu_temp.parse().expect("Failed to parse GPU temperature");
+
+    if gpu_temp > cpu_temp {
+        gpu_temp
     } else {
-        get_cpu_temp()
+        cpu_temp
     }
 }
 
-fn get_fan_speed_linear(fan: &Fan, current_temp: u32) -> u32 {
-    let min_temp: u32 = 80;
-    let max_temp: u32 = 100;
-    return (current_temp - min_temp) / (max_temp - min_temp) * (fan.max_speed - fan.max_speed)
-        + fan.min_speed;
-}
-
 fn main() {
+    let fans = init_fans();
     loop {
-        let fans = init_fans();
-        for fan in fans {
-            fan.set_manual_control(true);
-            fan.set_speed(get_fan_speed_linear(&fan, get_current_temp()));
+        for fan in &fans {
+            fan.set_speed(fan.calc_speed(get_current_temp()));
         }
     }
 }
