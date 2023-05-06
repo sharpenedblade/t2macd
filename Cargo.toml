@@ -3,6 +3,11 @@ name = "t2macd"
 license = "GPL-3.0-or-later"
 version = "0.1.0"
 edition = "2021"
+authors = ["Sharpened Blade <sharpenedblade@proton.me"]
+description = "A daemon to control the built-in fans on T2 macs"
+readme = "README.md"
+homepage = "https://github.com/sharpenedblade/t2macd/blob/main/README.md"
+repository = "https://github.com/sharpenedblade/t2macd"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
