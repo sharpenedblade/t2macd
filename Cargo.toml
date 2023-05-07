@@ -13,3 +13,5 @@ repository = "https://github.com/sharpenedblade/t2macd"
 
 [dependencies]
 glob = "0.3.1"
+serde = { version = "1.0.0", features = ["derive"] }
+serde_json = "1.0.96"

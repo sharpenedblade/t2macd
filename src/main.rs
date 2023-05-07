@@ -15,13 +15,95 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use glob::glob;
+use serde::Deserialize;
+use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
 enum FanCurve {
     LINEAR,
+}
+
+#[derive(Debug)]
+enum ConfigError {
+    IoError,
+    ParseError,
+    WriteError,
+    NotFound,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Config {
+    fan_curve: FanCurve,
+    min_temp: u32,
+    max_temp: u32,
+}
+
+impl Config {
+    fn get(path: &Path) -> Result<Config, ConfigError> {
+        match Config::read(path) {
+            Ok(config) => Ok(config),
+            Err(error) => match error {
+                ConfigError::NotFound => {
+                    let config = Config {
+                        fan_curve: FanCurve::LINEAR,
+                        min_temp: 80,
+                        max_temp: 100,
+                    };
+                    match config.write(path) {
+                        Ok(..) => (),
+                        Err(..) => println!("Failed to write config")
+                    };
+                    Ok(config)
+                }
+                ConfigError::IoError => Err(ConfigError::IoError),
+                ConfigError::ParseError => {
+                    println!("Config file corrupted. Is it well-formed?");
+                    println!("Using default config");
+                    Ok(Config {
+                        fan_curve: FanCurve::LINEAR,
+                        min_temp: 80,
+                        max_temp: 100,
+                    })
+                }
+                _ => {
+                    panic!("This should never happen")
+                }
+            },
+        }
+    }
+
+    fn write(&self, path: &Path) -> Result<(), ConfigError> {
+        match fs::write(path, serde_json::to_string(self).unwrap()) {
+            Ok(..) => Ok(()),
+            Err(..) => Err(ConfigError::WriteError),
+        }
+    }
+
+    fn read(path: &Path) -> Result<Config, ConfigError> {
+        let raw: String = match fs::read_to_string(path) {
+            Ok(string) => string,
+            Err(error) => match error.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    println!(
+                        "Permision Denied: Could not open {}",
+                        path.to_str().unwrap()
+                    );
+                    return Err(ConfigError::IoError);
+                }
+                std::io::ErrorKind::NotFound => return Err(ConfigError::NotFound),
+                _ => return Err(ConfigError::IoError),
+            },
+        };
+
+        match serde_json::from_str(&raw) {
+            Ok(config) => Ok(config),
+            Err(..) => Err(ConfigError::ParseError),
+        }
+    }
 }
 
 struct Fan {
@@ -32,7 +114,7 @@ struct Fan {
 }
 
 impl Fan {
-    fn new(path: PathBuf) -> Result<Fan, std::io::Error> {
+    fn new(path: PathBuf, config: &Config) -> Result<Fan, std::io::Error> {
         let fan = Fan {
             max_speed: fs::read_to_string(Path::join(&path, "_max"))?
                 .parse::<u32>()
@@ -41,7 +123,7 @@ impl Fan {
                 .parse::<u32>()
                 .unwrap(), // Same as above
             path,
-            speed_curve: FanCurve::LINEAR, // TODO: Stop hardcoding fan cruve
+            speed_curve: config.fan_curve.clone(),
         };
         fs::write(Path::join(&fan.path, "_manual"), "1")?;
         return Ok(fan);
@@ -51,12 +133,10 @@ impl Fan {
         fs::write(Path::join(&self.path, "_output"), speed.to_string())
     }
 
-    fn calc_speed(&self, current_temp: u32) -> u32 {
-        let min_temp: u32 = 80; // TODO: Stop hardcoding temp limits
-        let max_temp: u32 = 100;
+    fn calc_speed(&self, current_temp: u32, config: &Config) -> u32 {
         match self.speed_curve {
             FanCurve::LINEAR => {
-                (current_temp - min_temp) / (max_temp - min_temp)
+                (current_temp - config.min_temp) / (config.max_temp - config.min_temp)
                     * (self.max_speed - self.max_speed)
                     + self.min_speed
             }
@@ -64,11 +144,11 @@ impl Fan {
     }
 }
 
-fn init_fans() -> Result<Vec<Fan>, std::io::Error> {
+fn init_fans(config: &Config) -> Result<Vec<Fan>, std::io::Error> {
     let mut all_fans = Vec::new();
     for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*_input").unwrap() {
         // TODO: Strip `_input` from file name
-        all_fans.push(Fan::new(i.unwrap())?); // Glob is always readable
+        all_fans.push(Fan::new(i.unwrap(), config)?); // Glob is always readable
     }
     return Ok(all_fans);
 }
@@ -97,7 +177,8 @@ fn get_current_temp() -> u32 {
 }
 
 fn main() -> ExitCode {
-    let fans = match init_fans() {
+    let config = Config::get(&PathBuf::from("/etc/t2macd.json")).unwrap();
+    let fans = match init_fans(&config) {
         Ok(fans) => fans,
         Err(..) => panic!("An error occured when initializing fans"),
     };
@@ -107,7 +188,7 @@ fn main() -> ExitCode {
     }
     loop {
         for fan in &fans {
-            match fan.set_speed(fan.calc_speed(get_current_temp())) {
+            match fan.set_speed(fan.calc_speed(get_current_temp(), &config)) {
                 Ok(..) => continue,
                 Err(..) => println!("Error: Failed to set fan speed"),
             }
