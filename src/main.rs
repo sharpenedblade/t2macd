@@ -21,6 +21,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::env;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 enum FanCurve {
@@ -176,7 +177,21 @@ fn get_current_temp() -> u32 {
     }
 }
 
+fn check_supported_env() -> bool {
+    if  env::consts::OS != "linux" {
+        return false;
+    }
+    return true;
+    // Checking for root requires unsafe code or extra dep
+    // PLEASE DO NOT RUN AS A NORMAL USER
+    // IT CAN BREAK
+}
+
 fn main() -> ExitCode {
+    if !check_supported_env() {
+        println!("YOU ARE NOT RUNNING THIS ON LINUX!!! THIS IS A LINUX TOOL");
+        return ExitCode::from(2)
+    }
     let config = Config::get(&PathBuf::from("/etc/t2macd.json")).unwrap();
     let fans = match init_fans(&config) {
         Ok(fans) => fans,
