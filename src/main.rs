@@ -17,11 +17,11 @@
 use glob::glob;
 use serde::Deserialize;
 use serde::Serialize;
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::env;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 enum FanCurve {
@@ -56,7 +56,7 @@ impl Config {
                     };
                     match config.write(path) {
                         Ok(..) => (),
-                        Err(..) => println!("Failed to write config")
+                        Err(..) => println!("Failed to write config"),
                     };
                     Ok(config)
                 }
@@ -148,15 +148,19 @@ impl Fan {
 fn init_fans(config: &Config) -> Result<Vec<Fan>, std::io::Error> {
     let mut all_fans = Vec::new();
     for i in glob("/sys/devices/*/*/*/*/APP0001:00/fan*_input").unwrap() {
-        // TODO: Strip `_input` from file name
-        all_fans.push(Fan::new(i.unwrap(), config)?); // Glob is always readable
+        let mut i: String = String::from(i.unwrap().to_str().unwrap());
+        i.truncate(i.len() - 6);
+        let i: PathBuf = PathBuf::from(i);
+        all_fans.push(Fan::new(i, config)?);
     }
     return Ok(all_fans);
 }
 
 fn get_current_temp() -> u32 {
-    // TODO: Resolve glob pattern
-    let cpu_temp_path = PathBuf::from("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input");
+    let mut cpu_temp_path: PathBuf = Default::default();
+    for path in glob("/sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input").unwrap() {
+        cpu_temp_path = PathBuf::from(path.unwrap());
+    }
     let cpu_temp: String = match fs::read_to_string(cpu_temp_path) {
         Ok(temp) => temp,
         Err(..) => panic!("Failed to read CPU temp. Are you running as root?"),
@@ -178,7 +182,7 @@ fn get_current_temp() -> u32 {
 }
 
 fn check_supported_env() -> bool {
-    if  env::consts::OS != "linux" {
+    if env::consts::OS != "linux" {
         return false;
     }
     return true;
@@ -190,7 +194,7 @@ fn check_supported_env() -> bool {
 fn main() -> ExitCode {
     if !check_supported_env() {
         println!("YOU ARE NOT RUNNING THIS ON LINUX!!! THIS IS A LINUX TOOL");
-        return ExitCode::from(2)
+        return ExitCode::from(2);
     }
     let config = Config::get(&PathBuf::from("/etc/t2macd.json")).unwrap();
     let fans = match init_fans(&config) {
