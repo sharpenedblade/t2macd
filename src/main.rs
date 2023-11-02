@@ -17,23 +17,14 @@
 use glob::glob;
 use serde::Deserialize;
 use serde::Serialize;
-use std::env;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 enum FanCurve {
     LINEAR,
-}
-
-#[derive(Debug)]
-enum ConfigError {
-    IoError,
-    ParseError,
-    WriteError,
-    NotFound,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -44,65 +35,34 @@ struct Config {
 }
 
 impl Config {
-    fn get(path: &Path) -> Result<Config, ConfigError> {
-        match Config::read(path) {
-            Ok(config) => Ok(config),
-            Err(error) => match error {
-                ConfigError::NotFound => {
-                    let config = Config {
-                        fan_curve: FanCurve::LINEAR,
-                        min_temp: 80,
-                        max_temp: 100,
-                    };
-                    match config.write(path) {
-                        Ok(..) => (),
-                        Err(..) => println!("Failed to write config"),
-                    };
-                    Ok(config)
-                }
-                ConfigError::IoError => Err(ConfigError::IoError),
-                ConfigError::ParseError => {
-                    println!("Config file corrupted. Is it well-formed?");
-                    println!("Using default config");
+    fn get(path: &Path) -> Result<Config, std::io::Error> {
+        match fs::read_to_string(path) {
+            Ok(config_file) => match serde_json::from_str(&config_file) {
+                Ok(config) => Ok(config),
+                Err(..) => {
+                    eprintln!("Could not parse config, using default config");
                     Ok(Config {
                         fan_curve: FanCurve::LINEAR,
                         min_temp: 80,
                         max_temp: 100,
                     })
                 }
-                _ => {
-                    panic!("This should never happen")
-                }
             },
-        }
-    }
-
-    fn write(&self, path: &Path) -> Result<(), ConfigError> {
-        match fs::write(path, serde_json::to_string(self).unwrap()) {
-            Ok(..) => Ok(()),
-            Err(..) => Err(ConfigError::WriteError),
-        }
-    }
-
-    fn read(path: &Path) -> Result<Config, ConfigError> {
-        let raw: String = match fs::read_to_string(path) {
-            Ok(string) => string,
             Err(error) => match error.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    println!(
-                        "Permision Denied: Could not open {}",
-                        path.to_str().unwrap()
-                    );
-                    return Err(ConfigError::IoError);
+                io::ErrorKind::NotFound => {
+                    let config = Config {
+                        fan_curve: FanCurve::LINEAR,
+                        min_temp: 80,
+                        max_temp: 100,
+                    };
+                    match fs::write(path, serde_json::to_string(&config).unwrap()) {
+                        Ok(..) => println!("Created default config"),
+                        Err(..) => eprintln!("Failed to write default config"),
+                    };
+                    Ok(config)
                 }
-                std::io::ErrorKind::NotFound => return Err(ConfigError::NotFound),
-                _ => return Err(ConfigError::IoError),
+                _ => Err(error),
             },
-        };
-
-        match serde_json::from_str(&raw) {
-            Ok(config) => Ok(config),
-            Err(..) => Err(ConfigError::ParseError),
         }
     }
 }
@@ -153,6 +113,9 @@ fn init_fans(config: &Config) -> Result<Vec<Fan>, std::io::Error> {
         let i: PathBuf = PathBuf::from(i);
         all_fans.push(Fan::new(i, config)?);
     }
+    if all_fans.len() == 0 {
+        panic!();
+    }
     return Ok(all_fans);
 }
 
@@ -181,30 +144,12 @@ fn get_current_temp() -> u32 {
     }
 }
 
-fn check_supported_env() -> bool {
-    if env::consts::OS != "linux" {
-        return false;
-    }
-    return true;
-    // Checking for root requires unsafe code or extra dep
-    // PLEASE DO NOT RUN AS A NORMAL USER
-    // IT CAN BREAK
-}
-
-fn main() -> ExitCode {
-    if !check_supported_env() {
-        println!("YOU ARE NOT RUNNING THIS ON LINUX!!! THIS IS A LINUX TOOL");
-        return ExitCode::from(2);
-    }
+fn main() {
     let config = Config::get(&PathBuf::from("/etc/t2macd.json")).unwrap();
     let fans = match init_fans(&config) {
         Ok(fans) => fans,
         Err(..) => panic!("An error occured when initializing fans"),
     };
-    if fans.len() == 0 {
-        println!("No fans found");
-        return ExitCode::from(1);
-    }
     loop {
         for fan in &fans {
             match fan.set_speed(fan.calc_speed(get_current_temp(), &config)) {
